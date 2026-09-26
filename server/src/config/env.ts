@@ -34,6 +34,8 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v === "true" || v === "1"),
+  // Optional: reserve sign-up of the FIRST account for this email (protects a fresh public deployment).
+  OWNER_EMAIL: optionalString,
   SESSION_SECRET: z.string().default("dev-only-insecure-session-secret"),
 });
 
@@ -74,7 +76,7 @@ export const env = {
     },
   },
   openai: { apiKey: e.OPENAI_API_KEY, model: e.OPENAI_MODEL },
-  auth: { allowSignup: e.ALLOW_SIGNUP, sessionSecret: e.SESSION_SECRET },
+  auth: { allowSignup: e.ALLOW_SIGNUP, ownerEmail: e.OWNER_EMAIL?.toLowerCase(), sessionSecret: e.SESSION_SECRET },
 };
 
 export type Env = typeof env;

@@ -79,6 +79,9 @@ export async function signup(input: unknown) {
   if (!(await signupOpen())) {
     throw new AppError("FORBIDDEN", "Sign-up is closed. Ask the dashboard owner to create an account for you.");
   }
+  if (env.auth.ownerEmail && (await prisma.user.count()) === 0 && parsed.data.email !== env.auth.ownerEmail) {
+    throw new AppError("FORBIDDEN", "The first account on this dashboard is reserved for its owner.");
+  }
   const exists = await prisma.user.findUnique({ where: { email: parsed.data.email } });
   if (exists) throw new AppError("CONFLICT", "An account with this email already exists. Sign in instead.");
   const user = await prisma.user.create({

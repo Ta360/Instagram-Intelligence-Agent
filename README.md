@@ -116,6 +116,7 @@ Open **http://localhost:5373**. On first run the local database is initialised i
 | `MIN_REFRESH_INTERVAL_MINUTES` | Minimum live-tracking interval in production (default 15) |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Optional; enables LLM function calling (default `gpt-4o-mini`) |
 | `ALLOW_SIGNUP` | `false` (default): only the first account can sign up; `true` lets anyone with the URL create an account |
+| `OWNER_EMAIL` | Optional: only this email may create the first account — set it on any public deployment so nobody else can claim the owner account |
 | `SESSION_SECRET` | HMAC key for session cookies — **required** (32+ random chars) in production |
 
 Secrets are read only by the server. The browser receives booleans ("configured / not configured"), never values.

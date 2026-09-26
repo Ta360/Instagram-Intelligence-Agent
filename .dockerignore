@@ -5,3 +5,8 @@ server/.data
 server/.env
 .git
 *.log
+**/.env
+**/.env.*
+!**/.env.example
+.claude
+coverage

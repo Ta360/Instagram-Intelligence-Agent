@@ -1,6 +1,7 @@
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { env } from "../src/config/env.js";
 import { prisma } from "../src/lib/prisma.js";
 import { createSessionToken, hashPassword, parseSessionToken, verifyPassword } from "../src/services/authService.js";
 
@@ -86,6 +87,19 @@ describe("sign up / sign in / sign out", () => {
     expect(second.status).toBe(403);
     expect(second.body.error.code).toBe("FORBIDDEN");
     expect(await prisma.user.count()).toBe(1);
+  });
+
+  it("reserves the first account for OWNER_EMAIL when set", async () => {
+    env.auth.ownerEmail = "owner@example.com";
+    try {
+      const stranger = await request(app).post("/api/auth/signup").send({ name: "Stranger", email: "someone@else.com", password: "password123" });
+      expect(stranger.status).toBe(403);
+      expect(await prisma.user.count()).toBe(0);
+      const owner = await request(app).post("/api/auth/signup").send(OWNER);
+      expect(owner.status).toBe(201);
+    } finally {
+      env.auth.ownerEmail = undefined;
+    }
   });
 
   it("validates sign-up input", async () => {
