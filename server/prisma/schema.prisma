@@ -1,0 +1,181 @@
+// Instagram Intelligence Agent — PostgreSQL schema.
+//
+// Every analytics row carries a `dataSource` ("mock" | "production") so demo data
+// is never mixed with real analytics: all queries filter by the active mode.
+// Snapshots are append-only — values are never overwritten, which is what makes
+// date-wise historical tracking possible.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DataSource {
+  mock
+  production
+}
+
+enum SearchStatus {
+  SUCCESS
+  NOT_FOUND
+  PRIVATE
+  PERMISSION_REQUIRED
+  RATE_LIMITED
+  NETWORK_ERROR
+  INVALID_INPUT
+}
+
+enum SnapshotTrigger {
+  SEARCH
+  LIVE_REFRESH
+  MANUAL_REFRESH
+}
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model InstagramProfile {
+  id                String     @id @default(cuid())
+  dataSource        DataSource @map("data_source")
+  igUserId          String?    @map("ig_user_id")
+  username          String
+  displayName       String?    @map("display_name")
+  bio               String?
+  profilePictureUrl String?    @map("profile_picture_url")
+  website           String?
+  accountType       String?    @map("account_type")
+  followersCount    Int?       @map("followers_count")
+  followingCount    Int?       @map("following_count")
+  mediaCount        Int?       @map("media_count")
+  isVerified        Boolean?   @map("is_verified")
+  profileUrl        String?    @map("profile_url")
+  /// Per-field availability map: { field: "public" | "authorized_api" | "unavailable" | "demo" }
+  fieldAvailability Json       @default("{}") @map("field_availability")
+  /// Official API pagination cursor for the next page of media (null = everything accessible is loaded).
+  mediaCursor       String?    @map("media_cursor")
+  lastCheckedAt     DateTime   @default(now()) @map("last_checked_at")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  snapshots    ProfileSnapshot[]
+  searchEvents SearchEvent[]
+  mediaItems   MediaItem[]
+  saved        SavedProfile?
+  activities   ActivityEvent[]
+
+  @@unique([dataSource, username])
+  @@index([dataSource, lastCheckedAt])
+  @@map("instagram_profiles")
+}
+
+model ProfileSnapshot {
+  id                   String          @id @default(cuid())
+  profileId            String          @map("profile_id")
+  dataSource           DataSource      @map("data_source")
+  followersCount       Int?            @map("followers_count")
+  followingCount       Int?            @map("following_count")
+  mediaCount           Int?            @map("media_count")
+  reelCount            Int?            @map("reel_count")
+  accessibleMediaCount Int?            @map("accessible_media_count")
+  trigger              SnapshotTrigger @default(SEARCH)
+  capturedAt           DateTime        @default(now()) @map("captured_at")
+
+  profile InstagramProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, capturedAt])
+  @@index([dataSource, capturedAt])
+  @@map("profile_snapshots")
+}
+
+model SearchEvent {
+  id                   String       @id @default(cuid())
+  profileId            String?      @map("profile_id")
+  dataSource           DataSource   @map("data_source")
+  searchedUsername     String       @map("searched_username")
+  profileName          String?      @map("profile_name")
+  followersSnapshot    Int?         @map("followers_snapshot")
+  followingSnapshot    Int?         @map("following_snapshot")
+  mediaCountSnapshot   Int?         @map("media_count_snapshot")
+  accessibleMediaCount Int?         @map("accessible_media_count")
+  accessibleReelCount  Int?         @map("accessible_reel_count")
+  status               SearchStatus
+  searchedAt           DateTime     @default(now()) @map("searched_at")
+
+  profile InstagramProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([dataSource, searchedAt])
+  @@index([dataSource, searchedUsername, searchedAt])
+  @@index([profileId, searchedAt])
+  @@map("search_events")
+}
+
+model MediaItem {
+  id            String    @id @default(cuid())
+  profileId     String    @map("profile_id")
+  mediaId       String    @map("media_id")
+  mediaType     String    @map("media_type")
+  productType   String?   @map("product_type")
+  thumbnailUrl  String?   @map("thumbnail_url")
+  mediaUrl      String?   @map("media_url")
+  permalink     String?
+  caption       String?
+  likeCount     Int?      @map("like_count")
+  commentsCount Int?      @map("comments_count")
+  publishedAt   DateTime? @map("published_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  profile InstagramProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, mediaId])
+  @@index([profileId, publishedAt])
+  @@map("media_items")
+}
+
+model SavedProfile {
+  id        String   @id @default(cuid())
+  profileId String   @unique @map("profile_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile InstagramProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("saved_profiles")
+}
+
+model ChartSettings {
+  id             String   @id @default("default")
+  primaryColor   String   @default("#6366F1") @map("primary_color")
+  secondaryColor String   @default("#8B5CF6") @map("secondary_color")
+  accentColor    String   @default("#EC4899") @map("accent_color")
+  successColor   String   @default("#22C55E") @map("success_color")
+  warningColor   String   @default("#F59E0B") @map("warning_color")
+  dangerColor    String   @default("#EF4444") @map("danger_color")
+  infoColor      String   @default("#06B6D4") @map("info_color")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("chart_settings")
+}
+
+/// Timeline of real user actions (searches, profile views, reel plays, saves).
+model ActivityEvent {
+  id         String     @id @default(cuid())
+  dataSource DataSource @map("data_source")
+  type       String
+  username   String?
+  profileId  String?    @map("profile_id")
+  detail     String?
+  occurredAt DateTime   @default(now()) @map("occurred_at")
+
+  profile InstagramProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([dataSource, occurredAt])
+  @@map("activity_events")
+}

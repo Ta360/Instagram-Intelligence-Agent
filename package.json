@@ -1,0 +1,36 @@
+{
+  "name": "instagram-intelligence-agent",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Instagram Intelligence Agent — search, analyze & track Instagram profiles through authorized Instagram/Meta APIs.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n db,server,client -c magenta,blue,green \"npm:db:local\" \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "db:local": "npm --workspace server run db:local",
+    "db:push": "npm --workspace server run db:push",
+    "build": "npm --workspace server run build && npm --workspace client run build",
+    "start": "npm --workspace server run start",
+    "test": "npm --workspace server run test && npm --workspace client run test",
+    "typecheck": "npm --workspace server run typecheck && npm --workspace client run typecheck",
+    "lint": "npm run typecheck",
+    "dev:launch": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "prisma@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "@embedded-postgres/windows-x64@17.10.0-beta.17": true
+  }
+}
