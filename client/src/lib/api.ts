@@ -1,5 +1,7 @@
 import type {
   ActivityItem,
+  AuthStatus,
+  AuthUser,
   AssistantReply,
   CalendarDay,
   ChartColors,
@@ -60,6 +62,8 @@ async function request<T>(path: string, init: RequestInit & { query?: Query } = 
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const e = body?.error;
+    // A 401 on a dashboard route means the session ended: let the app show the sign-in screen.
+    if (res.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event("iia:unauthorized"));
     throw new ApiError(e?.code ?? "INTERNAL", e?.message ?? "Something went wrong.", res.status, e?.retryAfterSeconds);
   }
   return body as T;
@@ -70,9 +74,15 @@ export type RangeQuery = { range?: string; from?: string; to?: string };
 
 export const api = {
   // auth
-  authStatus: () => request<{ required: boolean; authenticated: boolean }>("/auth/status"),
-  login: (password: string) => request<{ authenticated: boolean }>("/auth/login", { method: "POST", body: json({ password }) }),
+  authStatus: () => request<AuthStatus>("/auth/status"),
+  signup: (b: { name: string; email: string; password: string }) =>
+    request<{ authenticated: boolean; user: AuthUser }>("/auth/signup", { method: "POST", body: json(b) }),
+  login: (b: { email: string; password: string; remember: boolean }) =>
+    request<{ authenticated: boolean; user: AuthUser }>("/auth/login", { method: "POST", body: json(b) }),
   logout: () => request<{ authenticated: boolean }>("/auth/logout", { method: "POST" }),
+  logoutAll: () => request<{ authenticated: boolean }>("/auth/logout-all", { method: "POST" }),
+  changePassword: (b: { currentPassword: string; newPassword: string }) =>
+    request<{ changed: boolean }>("/auth/change-password", { method: "POST", body: json(b) }),
 
   // search & profiles
   search: (query: string) => request<SearchResult>("/search", { method: "POST", body: json({ query }) }),

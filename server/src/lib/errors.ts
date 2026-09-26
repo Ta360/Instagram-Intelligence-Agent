@@ -9,6 +9,8 @@ export type ErrorCode =
   | "NETWORK_ERROR"
   | "API_NOT_CONFIGURED"
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "CONFLICT"
   | "INTERNAL";
 
 /** User-facing messages. Raw upstream errors and secrets never reach the client. */
@@ -22,6 +24,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   API_NOT_CONFIGURED:
     "Instagram API credentials are not configured. Add them in server/.env or switch INSTAGRAM_API_MODE to mock.",
   UNAUTHORIZED: "Sign in to use the dashboard.",
+  FORBIDDEN: "You do not have access to this action.",
+  CONFLICT: "This resource already exists.",
   INTERNAL: "Something went wrong. Please try again.",
 };
 
@@ -34,6 +38,8 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   NETWORK_ERROR: 502,
   API_NOT_CONFIGURED: 503,
   UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  CONFLICT: 409,
   INTERNAL: 500,
 };
 

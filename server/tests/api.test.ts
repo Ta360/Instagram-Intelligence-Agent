@@ -1,5 +1,5 @@
 import request from "supertest";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/lib/prisma.js";
 import { CallBudget } from "../src/services/instagram/callBudget.js";
@@ -11,6 +11,16 @@ import { GRAPH_OK } from "./fixtures.js";
 
 const app = createApp();
 const TZ = "UTC";
+/** Every dashboard route requires a signed-in account; this agent carries the session cookie. */
+const agent = request.agent(app);
+
+beforeAll(async () => {
+  await prisma.$executeRawUnsafe("TRUNCATE users RESTART IDENTITY CASCADE");
+  const res = await agent
+    .post("/api/auth/signup")
+    .send({ name: "Test Owner", email: "owner@example.com", password: "sup3rsecret" });
+  if (res.status !== 201) throw new Error("test signup failed: " + JSON.stringify(res.body));
+});
 
 async function resetDb() {
   await prisma.$executeRawUnsafe(
@@ -27,7 +37,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-const search = (query: string) => request(app).post("/api/search").send({ query });
+const search = (query: string) => agent.post("/api/search").send({ query });
 
 describe("POST /api/search (mock mode)", () => {
   it("returns a profile with demo-labelled fields and media, and stores event + snapshot", async () => {
@@ -88,23 +98,23 @@ describe("POST /api/search (mock mode)", () => {
 describe("profile retrieval & media", () => {
   it("retrieves the stored profile, snapshot and paginated media without calling the API", async () => {
     await search("alpha");
-    const p = await request(app).get("/api/instagram/profile/alpha");
+    const p = await agent.get("/api/instagram/profile/alpha");
     expect(p.status).toBe(200);
     expect(p.body.profile.username).toBe("alpha");
 
-    const snap = await request(app).get("/api/instagram/profile/alpha/snapshot");
+    const snap = await agent.get("/api/instagram/profile/alpha/snapshot");
     expect(snap.body.snapshot.followersCount).toBe(p.body.profile.followersCount);
 
-    const reels = await request(app).get("/api/instagram/profile/alpha/media?type=reels&pageSize=2");
+    const reels = await agent.get("/api/instagram/profile/alpha/media?type=reels&pageSize=2");
     expect(reels.body.items).toHaveLength(2);
     expect(reels.body.items.every((m: { isReel: boolean }) => m.isReel)).toBe(true);
     expect(reels.body.total).toBe(4);
-    const posts = await request(app).get("/api/instagram/profile/alpha/media?type=posts");
+    const posts = await agent.get("/api/instagram/profile/alpha/media?type=posts");
     expect(posts.body.items.every((m: { isReel: boolean }) => !m.isReel)).toBe(true);
   });
 
   it("returns 404 for a never-searched profile", async () => {
-    const res = await request(app).get("/api/instagram/profile/neverseen");
+    const res = await agent.get("/api/instagram/profile/neverseen");
     expect(res.status).toBe(404);
   });
 });
@@ -130,7 +140,7 @@ describe("historical snapshots & analytics", () => {
 
   it("returns date-wise profile history from stored snapshots", async () => {
     await seedHistory();
-    const res = await request(app).get(`/api/instagram/profile/hist/history?tz=${TZ}&from=2026-09-24&to=2026-09-25`);
+    const res = await agent.get(`/api/instagram/profile/hist/history?tz=${TZ}&from=2026-09-24&to=2026-09-25`);
     expect(res.status).toBe(200);
     expect(res.body.rows).toEqual([
       { date: "2026-09-25", followers: 110, following: 5, media: 9, reels: 2, searches: 1, snapshots: 1 },
@@ -140,26 +150,26 @@ describe("historical snapshots & analytics", () => {
 
   it("serves daily bar-chart series with date filtering", async () => {
     await seedHistory();
-    const counts = await request(app).get(`/api/analytics/daily?metric=searchCount&from=2026-09-24&to=2026-09-25&tz=${TZ}`);
+    const counts = await agent.get(`/api/analytics/daily?metric=searchCount&from=2026-09-24&to=2026-09-25&tz=${TZ}`);
     expect(counts.body.points).toEqual([
       { date: "2026-09-24", value: 1 },
       { date: "2026-09-25", value: 2 },
     ]);
-    const followers = await request(app).get(`/api/analytics/daily?metric=followers&username=hist&from=2026-09-23&to=2026-09-25&tz=${TZ}`);
+    const followers = await agent.get(`/api/analytics/daily?metric=followers&username=hist&from=2026-09-23&to=2026-09-25&tz=${TZ}`);
     expect(followers.body.points).toEqual([
       { date: "2026-09-23", value: null },
       { date: "2026-09-24", value: 100 },
       { date: "2026-09-25", value: 110 },
     ]);
-    const needsUser = await request(app).get(`/api/analytics/daily?metric=followers&range=7d&tz=${TZ}`);
+    const needsUser = await agent.get(`/api/analytics/daily?metric=followers&range=7d&tz=${TZ}`);
     expect(needsUser.status).toBe(400);
-    const badMetric = await request(app).get(`/api/analytics/daily?metric=nope`);
+    const badMetric = await agent.get(`/api/analytics/daily?metric=nope`);
     expect(badMetric.status).toBe(400);
   });
 
   it("serves the search distribution for the pie chart", async () => {
     await seedHistory();
-    const res = await request(app).get(`/api/analytics/search-distribution?from=2026-09-24&to=2026-09-25&tz=${TZ}`);
+    const res = await agent.get(`/api/analytics/search-distribution?from=2026-09-24&to=2026-09-25&tz=${TZ}`);
     expect(res.body.total).toBe(3);
     expect(res.body.slices).toEqual([
       { username: "hist", count: 2, percent: 67 },
@@ -169,19 +179,19 @@ describe("historical snapshots & analytics", () => {
 
   it("serves calendar months and per-date details", async () => {
     await seedHistory();
-    const cal = await request(app).get(`/api/calendar?month=2026-09&tz=${TZ}`);
+    const cal = await agent.get(`/api/calendar?month=2026-09&tz=${TZ}`);
     const d25 = cal.body.days.find((d: { date: string }) => d.date === "2026-09-25");
     expect(d25).toMatchObject({ searches: 2, profiles: 2 });
 
-    const date = await request(app).get(`/api/analytics/date/2026-09-25?tz=${TZ}`);
+    const date = await agent.get(`/api/analytics/date/2026-09-25?tz=${TZ}`);
     expect(date.body).toMatchObject({ date: "2026-09-25", totalSearches: 2, profilesChecked: 2, successfulSearches: 1 });
     expect(date.body.snapshots).toHaveLength(1);
-    expect((await request(app).get("/api/analytics/date/2026-13-40")).status).toBe(400);
+    expect((await agent.get("/api/analytics/date/2026-13-40")).status).toBe(400);
   });
 
   it("computes summary cards", async () => {
     await seedHistory();
-    const res = await request(app).get(`/api/analytics/summary?tz=${TZ}`);
+    const res = await agent.get(`/api/analytics/summary?tz=${TZ}`);
     expect(res.body).toMatchObject({ dataSource: "mock", totalSearches: 4, profilesTracked: 1, searchesToday: 1 });
     expect(res.body.mediaAvailable).toBe(4);
     expect(res.body.lastSearch.username).toBe("hist");
@@ -193,23 +203,23 @@ describe("search history", () => {
     await search("one");
     await search("two");
     await search("private_x");
-    const all = await request(app).get("/api/search-history?pageSize=2");
+    const all = await agent.get("/api/search-history?pageSize=2");
     expect(all.body.total).toBe(3);
     expect(all.body.items).toHaveLength(2);
     expect(all.body.totalPages).toBe(2);
-    const failed = await request(app).get("/api/search-history?status=PRIVATE");
+    const failed = await agent.get("/api/search-history?status=PRIVATE");
     expect(failed.body.items.map((i: { username: string }) => i.username)).toEqual(["private_x"]);
-    const byUser = await request(app).get("/api/search-history?username=tw");
+    const byUser = await agent.get("/api/search-history?username=tw");
     expect(byUser.body.total).toBe(1);
-    expect((await request(app).get("/api/search-history?status=BOGUS")).status).toBe(400);
+    expect((await agent.get("/api/search-history?status=BOGUS")).status).toBe(400);
 
-    const csv = await request(app).get("/api/search-history/export.csv");
+    const csv = await agent.get("/api/search-history/export.csv");
     expect(csv.headers["content-type"]).toContain("text/csv");
     expect(csv.text).toContain("Username,Profile Name,Search Date");
     expect(csv.text).toContain("@two");
     expect(csv.text).toContain("DEMO DATA");
 
-    const recent = await request(app).get("/api/search-history/recent?q=o");
+    const recent = await agent.get("/api/search-history/recent?q=o");
     expect(recent.body.items.map((i: { username: string }) => i.username)).toEqual(["one"]);
   });
 });
@@ -217,31 +227,31 @@ describe("search history", () => {
 describe("saved profiles", () => {
   it("saves, lists and removes profiles", async () => {
     await search("keeper");
-    const saved = await request(app).post("/api/saved-profiles").send({ username: "keeper" });
+    const saved = await agent.post("/api/saved-profiles").send({ username: "keeper" });
     expect(saved.status).toBe(201);
-    const again = await request(app).post("/api/saved-profiles").send({ username: "keeper" });
+    const again = await agent.post("/api/saved-profiles").send({ username: "keeper" });
     expect(again.body.id).toBe(saved.body.id); // idempotent
-    const list = await request(app).get("/api/saved-profiles");
+    const list = await agent.get("/api/saved-profiles");
     expect(list.body.items).toHaveLength(1);
     expect(list.body.items[0].profile.savedId).toBe(saved.body.id);
-    expect((await request(app).post("/api/saved-profiles").send({ username: "unknown" })).status).toBe(404);
-    expect((await request(app).delete(`/api/saved-profiles/${saved.body.id}`)).status).toBe(200);
-    expect((await request(app).get("/api/saved-profiles")).body.items).toHaveLength(0);
-    expect((await request(app).delete(`/api/saved-profiles/${saved.body.id}`)).status).toBe(404);
+    expect((await agent.post("/api/saved-profiles").send({ username: "unknown" })).status).toBe(404);
+    expect((await agent.delete(`/api/saved-profiles/${saved.body.id}`)).status).toBe(200);
+    expect((await agent.get("/api/saved-profiles")).body.items).toHaveLength(0);
+    expect((await agent.delete(`/api/saved-profiles/${saved.body.id}`)).status).toBe(404);
   });
 });
 
 describe("chart color settings", () => {
   it("returns defaults, validates hex and persists updates", async () => {
-    const get = await request(app).get("/api/settings/chart-colors");
+    const get = await agent.get("/api/settings/chart-colors");
     expect(get.body.colors.primary).toBe("#6366F1");
-    const bad = await request(app).put("/api/settings/chart-colors").send({ primary: "red" });
+    const bad = await agent.put("/api/settings/chart-colors").send({ primary: "red" });
     expect(bad.status).toBe(400);
-    const unknownKey = await request(app).put("/api/settings/chart-colors").send({ hacker: "#000000" });
+    const unknownKey = await agent.put("/api/settings/chart-colors").send({ hacker: "#000000" });
     expect(unknownKey.status).toBe(400);
-    const ok = await request(app).put("/api/settings/chart-colors").send({ primary: "#112233", accent: "#abcdef" });
+    const ok = await agent.put("/api/settings/chart-colors").send({ primary: "#112233", accent: "#abcdef" });
     expect(ok.body.colors).toMatchObject({ primary: "#112233", accent: "#ABCDEF", secondary: "#8B5CF6" });
-    const reset = await request(app).post("/api/settings/chart-colors/reset");
+    const reset = await agent.post("/api/settings/chart-colors/reset");
     expect(reset.body.colors.primary).toBe("#6366F1");
   });
 });
@@ -250,10 +260,10 @@ describe("live tracking refresh", () => {
   it("refreshes and stores a snapshot, then enforces the minimum interval", async () => {
     await search("live");
     await prisma.profileSnapshot.updateMany({ data: { capturedAt: new Date(Date.now() - 10 * 60_000) } });
-    const first = await request(app).post("/api/instagram/profile/live/refresh").send({ trigger: "live" });
+    const first = await agent.post("/api/instagram/profile/live/refresh").send({ trigger: "live" });
     expect(first.body.refreshed).toBe(true);
     expect(await prisma.profileSnapshot.count({ where: { trigger: "LIVE_REFRESH" } })).toBe(1);
-    const second = await request(app).post("/api/instagram/profile/live/refresh").send({ trigger: "live" });
+    const second = await agent.post("/api/instagram/profile/live/refresh").send({ trigger: "live" });
     expect(second.body.refreshed).toBe(false);
     expect(second.body.nextAllowedAt).toBeTruthy();
   });
@@ -262,37 +272,37 @@ describe("live tracking refresh", () => {
 describe("activity timeline", () => {
   it("records server and allowed client events", async () => {
     await search("acty");
-    expect((await request(app).post("/api/activity").send({ type: "play_media", username: "acty", detail: "Reel 01" })).status).toBe(201);
-    expect((await request(app).post("/api/activity").send({ type: "search" })).status).toBe(400); // server-only type
-    const list = await request(app).get("/api/activity");
+    expect((await agent.post("/api/activity").send({ type: "play_media", username: "acty", detail: "Reel 01" })).status).toBe(201);
+    expect((await agent.post("/api/activity").send({ type: "search" })).status).toBe(400); // server-only type
+    const list = await agent.get("/api/activity");
     expect(list.body.items.map((i: { type: string }) => i.type)).toEqual(["play_media", "search"]);
   });
 });
 
 describe("AI assistant (tool-calling, local engine)", () => {
   it("calls real backend tools instead of inventing data", async () => {
-    const s = await request(app).post("/api/assistant/chat").send({ message: "Search @assist.me", tz: TZ });
+    const s = await agent.post("/api/assistant/chat").send({ message: "Search @assist.me", tz: TZ });
     expect(s.body.engine).toBe("local");
     expect(s.body.toolCalls[0]).toMatchObject({ name: "searchInstagramProfile", ok: true });
     expect(s.body.actions).toEqual([{ type: "openProfile", username: "assist.me" }]);
     const profile = await prisma.instagramProfile.findFirstOrThrow({ where: { username: "assist.me" } });
     expect(s.body.reply).toContain(profile.followersCount!.toLocaleString("en-US"));
 
-    const today = await request(app).post("/api/assistant/chat").send({ message: "Show profiles searched today", tz: TZ });
+    const today = await agent.post("/api/assistant/chat").send({ message: "Show profiles searched today", tz: TZ });
     expect(today.body.toolCalls[0].name).toBe("getDateAnalytics");
     expect(today.body.reply).toContain("@assist.me");
 
-    const missing = await request(app).post("/api/assistant/chat").send({ message: "Show @nobody.here analytics", tz: TZ });
+    const missing = await agent.post("/api/assistant/chat").send({ message: "Show @nobody.here analytics", tz: TZ });
     expect(missing.body.toolCalls[0]).toMatchObject({ ok: false });
     expect(missing.body.reply).toContain("not been searched");
 
-    expect((await request(app).post("/api/assistant/chat").send({ message: "" })).status).toBe(400);
+    expect((await agent.post("/api/assistant/chat").send({ message: "" })).status).toBe(400);
   });
 });
 
 describe("system status & secrets", () => {
   it("reports mode and capabilities without exposing secrets", async () => {
-    const res = await request(app).get("/api/system/status");
+    const res = await agent.get("/api/system/status");
     expect(res.body).toMatchObject({ mode: "mock", demoData: true, connected: true });
     expect(res.body.database.ok).toBe(true);
     expect(res.body.liveTracking.allowedIntervals).toEqual([0, 5, 15, 30, 60]);
@@ -301,8 +311,8 @@ describe("system status & secrets", () => {
   });
 
   it("returns sanitized JSON for unknown endpoints and bad JSON", async () => {
-    expect((await request(app).get("/api/nope")).status).toBe(404);
-    const bad = await request(app).post("/api/search").set("content-type", "application/json").send("{bad");
+    expect((await agent.get("/api/nope")).status).toBe(404);
+    const bad = await agent.post("/api/search").set("content-type", "application/json").send("{bad");
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe("INVALID_INPUT");
   });
@@ -327,14 +337,14 @@ describe("production mode (Graph API) & data separation", () => {
     expect(res.body.profile.unavailableReasons.isVerified).toMatch(/not exposed/i);
     expect(res.body.media.find((m: { mediaId: string }) => m.mediaId === "m2").playable).toBe(false);
 
-    const prodSummary = await request(app).get("/api/analytics/summary");
+    const prodSummary = await agent.get("/api/analytics/summary");
     expect(prodSummary.body).toMatchObject({ dataSource: "production", totalSearches: 1, profilesTracked: 1 });
-    expect((await request(app).get("/api/instagram/profile/demo.only")).status).toBe(404);
+    expect((await agent.get("/api/instagram/profile/demo.only")).status).toBe(404);
 
     setInstagramProvider(new MockInstagramProvider());
-    const mockSummary = await request(app).get("/api/analytics/summary");
+    const mockSummary = await agent.get("/api/analytics/summary");
     expect(mockSummary.body).toMatchObject({ dataSource: "mock", totalSearches: 1 });
-    expect((await request(app).get("/api/instagram/profile/brandaccount")).status).toBe(404);
+    expect((await agent.get("/api/instagram/profile/brandaccount")).status).toBe(404);
   });
 });
 
@@ -345,17 +355,17 @@ describe("media pagination (load all accessible posts & reels)", () => {
     expect(first.body.profile.hasMoreMedia).toBe(true);
     expect(JSON.stringify(first.body)).not.toContain("demo:12"); // cursor never leaves the server
 
-    const p2 = await request(app).post("/api/instagram/profile/pager.user/media/more");
+    const p2 = await agent.post("/api/instagram/profile/pager.user/media/more");
     expect(p2.body).toEqual({ added: 12, hasMoreMedia: true, totalStored: 24 });
-    const p3 = await request(app).post("/api/instagram/profile/pager.user/media/more");
+    const p3 = await agent.post("/api/instagram/profile/pager.user/media/more");
     expect(p3.body).toEqual({ added: 12, hasMoreMedia: false, totalStored: 36 });
-    const done = await request(app).post("/api/instagram/profile/pager.user/media/more");
+    const done = await agent.post("/api/instagram/profile/pager.user/media/more");
     expect(done.body).toEqual({ added: 0, hasMoreMedia: false, totalStored: 36 });
 
-    const reels = await request(app).get("/api/instagram/profile/pager.user/media?type=reels&pageSize=50");
+    const reels = await agent.get("/api/instagram/profile/pager.user/media?type=reels&pageSize=50");
     expect(reels.body.total).toBe(12);
-    expect((await request(app).get("/api/instagram/profile/pager.user")).body.profile.hasMoreMedia).toBe(false);
-    expect((await request(app).post("/api/instagram/profile/never.searched/media/more")).status).toBe(404);
+    expect((await agent.get("/api/instagram/profile/pager.user")).body.profile.hasMoreMedia).toBe(false);
+    expect((await agent.post("/api/instagram/profile/never.searched/media/more")).status).toBe(404);
   });
 });
 

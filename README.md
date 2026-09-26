@@ -36,6 +36,7 @@ Ports in development: **client http://localhost:5373**, **API http://localhost:4
 - **Search history** table with username/status/date filters, pagination and **Export CSV** (formula-injection safe).
 - **Saved profiles** (Quick View / Remove) and an **Activity Timeline** built from real database events (searches, views, reel plays, saves, refreshes, exports).
 - **AI Assistant** that understands commands like *"Search @exampleuser"*, *"Show today's searches"*, *"Show my most searched profiles this week"*, *"Show profile activity for September 2026"*. It calls backend tools and shows the tool trace plus deep-link actions.
+- **Sign in / Sign up** — dashboard accounts, a user menu (sign out, sign out of all devices) and an Account panel to change your password.
 - **Summary cards**: Total Searches · Profiles Tracked · Searches Today · Videos/Reels Available · Last Search.
 - **System Status & API Settings** pages: connection, database, AI engine, rate-limit budget, and a capability matrix (supported / limited / unavailable).
 - Dark/light theme, glassmorphism, responsive layout (sidebar on desktop, drawer on mobile), empty/error states for every panel.
@@ -114,7 +115,8 @@ Open **http://localhost:5373**. On first run the local database is initialised i
 | `PROFILE_CACHE_TTL_SECONDS` | Profile response cache (default 300) |
 | `MIN_REFRESH_INTERVAL_MINUTES` | Minimum live-tracking interval in production (default 15) |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Optional; enables LLM function calling (default `gpt-4o-mini`) |
-| `DASHBOARD_PASSWORD` / `SESSION_SECRET` | Optional dashboard login (HttpOnly signed cookie) |
+| `ALLOW_SIGNUP` | `false` (default): only the first account can sign up; `true` lets anyone with the URL create an account |
+| `SESSION_SECRET` | HMAC key for session cookies — **required** (32+ random chars) in production |
 
 Secrets are read only by the server. The browser receives booleans ("configured / not configured"), never values.
 
@@ -197,7 +199,10 @@ Uses the Graph API provider. If credentials are missing, the app **does not** fa
 | POST | `/api/settings/chart-colors/reset` | Restore defaults |
 | POST | `/api/assistant/chat` | `{ message, history? }` → tool-calling assistant |
 | GET | `/api/system/status` | Mode, connection, DB, AI, rate budget, capabilities |
-| GET / POST | `/api/auth/status`, `/api/auth/login`, `/api/auth/logout` | Optional dashboard auth |
+| GET | `/api/auth/status` | Signed-in user + whether sign-up is open (public) |
+| POST | `/api/auth/signup`, `/api/auth/login` | Create account / sign in (`{ email, password, remember }`) — rate-limited |
+| POST | `/api/auth/logout`, `/api/auth/logout-all` | Sign out this browser / every device |
+| POST | `/api/auth/change-password` | Change password (revokes other sessions) |
 
 All date endpoints accept `tz` (IANA, e.g. `Asia/Kolkata`) so days are bucketed in the viewer's timezone. Errors are always `{ error: { code, message } }` with user-safe messages.
 
@@ -209,7 +214,7 @@ All date endpoints accept `tz` (IANA, e.g. `Asia/Kolkata`) so days are bucketed 
 - Helmet with a strict CSP, CORS allow-list, 64 KB JSON limit, `x-powered-by` disabled.
 - Request logging records method, path, status and duration only, with automatic credential redaction.
 - Error sanitization: upstream errors are mapped to fixed messages; stack traces never reach the client.
-- Optional dashboard password with a timing-safe compare and an HMAC-signed HttpOnly `SameSite=Strict` cookie. The login page states clearly that it is **not** an Instagram password.
+- **Dashboard accounts:** every page and API route requires sign-in. Passwords are hashed with scrypt (random salt); sessions are HMAC-signed HttpOnly `SameSite=Lax` cookies (12 h, or 30 days with "Keep me signed in"). Sign-in is rate-limited, returns one message for unknown email or wrong password, and hashes a dummy password for unknown emails so timing reveals nothing. Changing the password or "Sign out of all devices" revokes every other session. Only the first account can sign up unless `ALLOW_SIGNUP=true`. The sign-in screen states it is **not** an Instagram password.
 
 ## 14. Deployment
 
@@ -220,11 +225,11 @@ docker build -t instagram-intel .
 docker run -p 8080:8080 \
   -e DATABASE_URL=postgresql://user:pass@host:5432/instagram_intel \
   -e INSTAGRAM_API_MODE=production -e INSTAGRAM_ACCESS_TOKEN=... -e INSTAGRAM_BUSINESS_ACCOUNT_ID=... \
-  -e INSTAGRAM_APP_SECRET=... -e CORS_ORIGINS=https://your.domain -e SESSION_SECRET=... -e DASHBOARD_PASSWORD=... \
+  -e INSTAGRAM_APP_SECRET=... -e CORS_ORIGINS=https://your.domain -e SESSION_SECRET=<32+ random chars> \
   instagram-intel
 ```
 
-The container applies the schema (`prisma db push`) and starts the API, which also serves `client/dist`. Any container host works (Azure Container Apps, Render, Fly.io, Cloud Run) with a managed PostgreSQL. Always set `DASHBOARD_PASSWORD` for internet-facing deployments.
+The container applies the schema (`prisma db push`) and starts the API, which also serves `client/dist`. Any container host works (Azure Container Apps, Render, Fly.io, Cloud Run) with a managed PostgreSQL. Create your owner account right after the first deploy — sign-up closes automatically once the first account exists.
 
 **Without Docker:** `npm ci && npm run build`, set env vars, run `npm run db:push`, then `npm start`.
 

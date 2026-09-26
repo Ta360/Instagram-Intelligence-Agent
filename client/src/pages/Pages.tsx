@@ -1,7 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle,
   BarChart3,
   CheckCircle2,
   Cpu,
@@ -18,17 +17,17 @@ import {
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Select, Skeleton } from "@/components/ui/primitives";
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Select, Skeleton } from "@/components/ui/primitives";
 import { DemoBadge, EmptyState, ErrorState, PageHeader, ProfileAvatar, SectionTitle } from "@/components/common";
 import { DailyActivityChart, DistributionChart, RangePicker, type RangeValue } from "@/components/charts/Charts";
 import { SummaryCards } from "@/components/SummaryCards";
 import { TrackingCalendar } from "@/components/TrackingCalendar";
 import { ActivityTimeline, LiveTrackingControl, ProfileCard, ProfileCardSkeleton, ProfileHistoryTable, ProfileLoader } from "@/components/profile/Profile";
 import { ReelViewer } from "@/components/media/Media";
+import { AccountCard } from "@/components/auth/Account";
 import { ChartColorSettings, SavedProfilesGrid, SearchHistoryTable, SearchProgress } from "@/components/Panels";
 import { useProfile, useProfiles, useSystemStatus } from "@/hooks/queries";
 import { isBusy, useAppState } from "@/hooks/appState";
-import { api } from "@/lib/api";
 import { formatDateTime, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -303,7 +302,8 @@ export function SettingsPage() {
   const { data: s, isLoading, error, refetch } = useSystemStatus();
   return (
     <div className="space-y-6">
-      <PageHeader title="API Settings" description="Instagram/Meta API configuration, live-tracking limits and chart colors." />
+      <PageHeader title="API Settings" description="Your account, Instagram/Meta API configuration, live-tracking limits and chart colors." />
+      <AccountCard />
       {error ? (
         <ErrorState error={error} onRetry={() => void refetch()} />
       ) : isLoading || !s ? (
@@ -343,7 +343,7 @@ export function SettingsPage() {
               <Row ok={null} label="Profile cache TTL" value={`${s.cache.profileTtlSeconds}s`} />
               <Row ok={null} label="Minimum live refresh" value={`${s.liveTracking.minIntervalMinutes} min`} />
               <Row ok={null} label="Allowed intervals" value={s.liveTracking.allowedIntervals.map((m) => (m === 0 ? "Manual" : `${m}m`)).join(", ")} />
-              <Row ok={null} label="Dashboard password" value={s.auth.required ? "Enabled" : "Disabled (local use)"} />
+              <Row ok={true} label="Dashboard sign-in" value={s.auth.signupOpenByConfig ? "Required · sign-up open (ALLOW_SIGNUP)" : "Required · sign-up closed"} />
             </CardContent>
           </Card>
         </div>
@@ -415,45 +415,6 @@ export function StatusPage() {
           </p>
         </>
       )}
-    </div>
-  );
-}
-
-// ─── Login (only when DASHBOARD_PASSWORD is set) ───────────────────────────
-export function LoginPage({ onDone }: { onDone: () => void }) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.login(password);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="grid min-h-screen place-items-center p-4">
-      <Card className="w-full max-w-sm p-6">
-        <img src="/favicon.svg" alt="" className="mb-4 size-12" />
-        <h1 className="text-xl font-bold">Instagram Intelligence Agent</h1>
-        <p className="mb-5 text-sm text-muted-foreground">Enter the dashboard password configured on the server.</p>
-        <p className="mb-4 flex gap-2 rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
-          <AlertTriangle className="size-4 shrink-0" /> This is the dashboard password — never your Instagram password. This app never asks for Instagram credentials.
-        </p>
-        <form onSubmit={submit} className="space-y-3">
-          <Input type="password" autoComplete="current-password" placeholder="Dashboard password" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Dashboard password" />
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          <Button type="submit" variant="gradient" className="w-full" disabled={busy || !password}>
-            Sign in
-          </Button>
-        </form>
-      </Card>
     </div>
   );
 }

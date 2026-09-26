@@ -29,7 +29,11 @@ const schema = z.object({
   OPENAI_API_KEY: optionalString,
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
 
-  DASHBOARD_PASSWORD: optionalString,
+  // Dashboard accounts: the first account can always sign up; later sign-ups only when true.
+  ALLOW_SIGNUP: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
   SESSION_SECRET: z.string().default("dev-only-insecure-session-secret"),
 });
 
@@ -42,6 +46,11 @@ if (!parsed.success) {
 }
 
 const e = parsed.data;
+
+if (e.NODE_ENV === "production" && (e.SESSION_SECRET === "dev-only-insecure-session-secret" || e.SESSION_SECRET.length < 32)) {
+  console.error("SESSION_SECRET must be set to a random string of at least 32 characters in production.");
+  process.exit(1);
+}
 
 export const env = {
   port: e.API_PORT ?? e.PORT,
@@ -65,7 +74,7 @@ export const env = {
     },
   },
   openai: { apiKey: e.OPENAI_API_KEY, model: e.OPENAI_MODEL },
-  auth: { password: e.DASHBOARD_PASSWORD, sessionSecret: e.SESSION_SECRET },
+  auth: { allowSignup: e.ALLOW_SIGNUP, sessionSecret: e.SESSION_SECRET },
 };
 
 export type Env = typeof env;

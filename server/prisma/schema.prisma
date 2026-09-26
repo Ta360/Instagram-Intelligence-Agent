@@ -35,9 +35,16 @@ enum SnapshotTrigger {
   MANUAL_REFRESH
 }
 
+/// Dashboard accounts (never Instagram credentials). Passwords are stored as scrypt hashes.
 model User {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String    @map("password_hash")
+  /// Incremented on sign-out-everywhere / password change to invalidate existing sessions.
+  sessionVersion Int      @default(0) @map("session_version")
+  lastLoginAt   DateTime? @map("last_login_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("users")
 }

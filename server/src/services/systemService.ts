@@ -65,7 +65,7 @@ export async function getSystemStatus() {
       allowedIntervals: allowedRefreshIntervals(),
       minIntervalMinutes: mode === "mock" ? 1 : env.instagram.minRefreshIntervalMinutes,
     },
-    auth: { required: Boolean(env.auth.password) },
+    auth: { required: true, signupOpenByConfig: env.auth.allowSignup },
     capabilities: capabilities(mode),
     serverTime: new Date().toISOString(),
   };

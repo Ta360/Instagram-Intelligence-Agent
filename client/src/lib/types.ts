@@ -193,7 +193,7 @@ export interface SystemStatus {
   rateBudget: { used: number; limit: number; windowMinutes: number; cooldownUntil: string | null; metaUsage: Record<string, unknown> | null };
   cache: { profileTtlSeconds: number };
   liveTracking: { allowedIntervals: number[]; minIntervalMinutes: number };
-  auth: { required: boolean };
+  auth: { required: boolean; signupOpenByConfig: boolean };
   capabilities: { feature: string; state: "supported" | "limited" | "unavailable"; note: string }[];
   serverTime: string;
 }
@@ -219,4 +219,17 @@ export interface AssistantReply {
   dataSource: DataSource;
   toolCalls: { name: string; args: Record<string, unknown>; ok: boolean; error?: string }[];
   actions: AssistantAction[];
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+export interface AuthStatus {
+  authenticated: boolean;
+  user: AuthUser | null;
+  signupOpen: boolean;
 }

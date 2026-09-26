@@ -1,10 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { env } from "../config/env.js";
 import { AppError, ERROR_MESSAGES } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 import { safeTimeZone } from "../lib/dates.js";
+import { SESSION_COOKIE, userFromSession, type PublicUser } from "../services/authService.js";
 
 // ─── Request logging (method, path, status, duration — never query strings or bodies) ──
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
@@ -29,34 +29,11 @@ export const searchLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHe
 export const assistantLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: "draft-7", legacyHeaders: false, handler: limitHandler, skip: skipInTests });
 export const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, handler: limitHandler, skip: skipInTests });
 
-// ─── Optional dashboard authentication (enabled when DASHBOARD_PASSWORD is set) ─────
-export const SESSION_COOKIE = "iia_session";
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-
-function sign(value: string) {
-  return createHmac("sha256", env.auth.sessionSecret).update(value).digest("base64url");
-}
-
-export function createSessionToken(now = Date.now()) {
-  const exp = String(now + SESSION_TTL_MS);
-  return `${exp}.${sign(exp)}`;
-}
-
-export function verifySessionToken(token: string | undefined, now = Date.now()): boolean {
-  if (!token) return false;
-  const [exp, sig] = token.split(".");
-  if (!exp || !sig) return false;
-  const expected = Buffer.from(sign(exp));
-  const got = Buffer.from(sig);
-  if (expected.length !== got.length || !timingSafeEqual(expected, got)) return false;
-  return Number(exp) > now;
-}
-
-export function passwordMatches(input: unknown): boolean {
-  if (!env.auth.password || typeof input !== "string") return false;
-  const a = Buffer.from(sign(input));
-  const b = Buffer.from(sign(env.auth.password));
-  return timingSafeEqual(a, b);
+// ─── Dashboard authentication (user accounts, signed HttpOnly session cookie) ──────
+declare module "express-serve-static-core" {
+  interface Request {
+    user?: PublicUser;
+  }
 }
 
 export function readCookie(req: Request, name: string): string | undefined {
@@ -64,17 +41,29 @@ export function readCookie(req: Request, name: string): string | undefined {
   if (!header) return undefined;
   for (const part of header.split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
+    if (k === name) {
+      try {
+        return decodeURIComponent(v.join("="));
+      } catch {
+        return undefined;
+      }
+    }
   }
   return undefined;
 }
 
-export function isAuthenticated(req: Request) {
-  return !env.auth.password || verifySessionToken(readCookie(req, SESSION_COOKIE));
+/** Attaches req.user when the request carries a valid, unrevoked session. */
+export async function attachUser(req: Request, _res: Response, next: NextFunction) {
+  try {
+    req.user = (await userFromSession(readCookie(req, SESSION_COOKIE))) ?? undefined;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {
-  if (isAuthenticated(req)) return next();
+  if (req.user) return next();
   next(new AppError("UNAUTHORIZED"));
 }
 

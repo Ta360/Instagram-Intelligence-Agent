@@ -4,17 +4,18 @@ import { env } from "../config/env.js";
 import { dayKey, isDayKey, isMonthKey } from "../lib/dates.js";
 import { AppError } from "../lib/errors.js";
 import { HEX_COLOR_RE } from "../lib/validation.js";
+import { assistantLimiter, attachUser, loginLimiter, requireAuth, searchLimiter, tzOf } from "../middleware/index.js";
 import {
+  REMEMBER_TTL_MS,
   SESSION_COOKIE,
-  assistantLimiter,
+  SESSION_TTL_MS,
+  changePassword,
   createSessionToken,
-  isAuthenticated,
-  loginLimiter,
-  passwordMatches,
-  requireAuth,
-  searchLimiter,
-  tzOf,
-} from "../middleware/index.js";
+  login,
+  signOutEverywhere,
+  signup,
+  signupOpen,
+} from "../services/authService.js";
 import { CLIENT_ACTIVITY_TYPES, listActivity, logActivity } from "../services/activityService.js";
 import { chat } from "../services/ai/assistantService.js";
 import { DAILY_METRICS, resolveRange, type RangePreset } from "../services/instagram/analyticsTransforms.js";
@@ -79,29 +80,69 @@ export function buildRouter() {
   // ── Public ─────────────────────────────────────────────────────────────
   api.get("/health", (_req, res) => res.json({ ok: true }));
 
-  api.get("/auth/status", (req, res) =>
-    res.json({ required: Boolean(env.auth.password), authenticated: isAuthenticated(req) }),
+  // ── Dashboard accounts ───────────────────────────────────────────────────
+  api.use(attachUser);
+
+  const setSession = (res: Response, userId: string, version: number, remember: boolean) => {
+    const ttl = remember ? REMEMBER_TTL_MS : SESSION_TTL_MS;
+    res.cookie(SESSION_COOKIE, createSessionToken(userId, version, ttl), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: env.isProduction,
+      path: "/",
+      // Without "remember me" the cookie ends with the browser session (and the token itself expires in 12h).
+      ...(remember ? { maxAge: ttl } : {}),
+    });
+  };
+  const clearSession = (res: Response) => res.clearCookie(SESSION_COOKIE, { path: "/", httpOnly: true, sameSite: "lax", secure: env.isProduction });
+
+  api.get(
+    "/auth/status",
+    h(async (req) => ({ authenticated: Boolean(req.user), user: req.user ?? null, signupOpen: await signupOpen() })),
+  );
+  api.post(
+    "/auth/signup",
+    loginLimiter,
+    h(async (req, res) => {
+      const { user, sessionVersion } = await signup(req.body);
+      setSession(res, user.id, sessionVersion, false);
+      res.status(201);
+      return { authenticated: true, user };
+    }),
   );
   api.post(
     "/auth/login",
     loginLimiter,
     h(async (req, res) => {
-      if (!env.auth.password) return { authenticated: true };
-      if (!passwordMatches(req.body?.password)) throw new AppError("UNAUTHORIZED", "Incorrect password.");
-      res.cookie(SESSION_COOKIE, createSessionToken(), {
-        httpOnly: true,
-        sameSite: "strict",
-        secure: env.isProduction,
-        maxAge: 12 * 60 * 60 * 1000,
-        path: "/",
-      });
-      return { authenticated: true };
+      const { user, sessionVersion, remember } = await login(req.body);
+      setSession(res, user.id, sessionVersion, remember);
+      return { authenticated: true, user };
     }),
   );
   api.post("/auth/logout", (_req, res) => {
-    res.clearCookie(SESSION_COOKIE, { path: "/" });
+    clearSession(res);
     res.json({ authenticated: false });
   });
+  api.post(
+    "/auth/logout-all",
+    requireAuth,
+    h(async (req, res) => {
+      await signOutEverywhere(req.user!.id);
+      clearSession(res);
+      return { authenticated: false };
+    }),
+  );
+  api.post(
+    "/auth/change-password",
+    loginLimiter,
+    requireAuth,
+    h(async (req, res) => {
+      const { sessionVersion } = await changePassword(req.user!.id, req.body);
+      // Other sessions are revoked; keep this browser signed in with a fresh session.
+      setSession(res, req.user!.id, sessionVersion, false);
+      return { changed: true };
+    }),
+  );
 
   // Synthetic demo images (mock mode only; contain no user data).
   api.get("/demo-assets/avatar/:name", (req, res) => {
@@ -114,7 +155,7 @@ export function buildRouter() {
     res.type("image/svg+xml").set("Cache-Control", "public, max-age=86400").send(demoThumbSvg(seed));
   });
 
-  // ── Everything below requires auth when DASHBOARD_PASSWORD is set ──────
+  // ── Everything below requires a signed-in dashboard account ────────────
   api.use(requireAuth);
 
   // Search & profiles

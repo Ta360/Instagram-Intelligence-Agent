@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/primitives";
 import { AssistantPanel } from "@/components/AssistantPanel";
+import { UserMenu } from "@/components/auth/Account";
 import { useSystemStatus } from "@/hooks/queries";
 import { useAppState } from "@/hooks/appState";
 import { useTheme } from "@/theme/themeProvider";
@@ -141,6 +142,7 @@ export function AppLayout() {
                 <Bot className="text-primary" />
                 <span className="hidden md:inline">AI Assistant</span>
               </Button>
+              <UserMenu />
             </div>
           </div>
         </header>

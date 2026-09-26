@@ -13,7 +13,7 @@ const server = app.listen(env.port, () => {
     instagramMode: provider.dataSource,
     provider: provider.name,
     ai: env.openai.apiKey ? "openai" : "local",
-    auth: env.auth.password ? "password" : "open",
+    auth: env.auth.allowSignup ? "accounts (sign-up open)" : "accounts",
   });
   if (provider.dataSource === "mock") console.log("⚠  INSTAGRAM_API_MODE=mock — serving DEMO DATA");
 });
